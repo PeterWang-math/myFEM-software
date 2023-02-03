@@ -1,0 +1,452 @@
+% This script is a test for FEM solver of 2d linear stable elasticity equation:
+%       -div(sigma(u)) = f on \Omega, 
+% ( sigma is related to parameter lambda and mu )
+% with three boundary conditions: 
+% 1. Dirichlet: u = gD
+% 2. Neumann: c*grad(u)·n = gN
+% 3. Robin: c*grad(u)·n + gR1*u = gR2
+% Remark: the mesh data is got from iFEM software package
+
+
+% setpath;
+close all;
+clear;
+% clc;
+tic;
+
+exnum = 1; % example number
+elemtype = 3; % 3 for triangle mesh and 4 for quadrilateral mesh
+femtype.type = 'pgm'; %PG method
+%femtype.type = 'ipdg'; %IPDG method
+
+trbasis_type = 'l'; trbasis_order = 1;
+tsbasis_type = 'l'; tsbasis_order = 1;
+Gauss_order = 7;
+errtype = 'l2';
+plottype = '2'; % '0':draw mesh; '1':plot error; '2':plot solution;
+                  % '3':stiffness matrix; '4':error surface; '5':cpu time
+plotdx_order = 0;
+plotdy_order = 0;
+upperbd = 1e2;  
+refine = 9;
+
+switch errtype
+    case 'linf'
+        ord = trbasis_order + 1; soblev = 'L^{\infty}';
+    case 'l2'
+        ord = trbasis_order + 1; soblev = 'L^2'; 
+    case 'h1'
+        ord = trbasis_order;  soblev = 'H^1'; 
+    case 'h1semi'
+        ord = trbasis_order;  soblev = 'H^1 semi';
+    case 'h2'
+        ord = trbasis_order - 1;  soblev = 'H^2';
+    case 'h2semi'
+        ord = trbasis_order - 1;  soblev = 'H^2 semi';
+    case 'h3'
+        ord = trbasis_order - 2;  soblev = 'H^3';
+    case 'h3semi'
+        ord = trbasis_order - 2;  soblev = 'H^3 semi';
+    case 'h4'
+        ord = trbasis_order - 3;  soblev = 'H^4';
+    case 'h4semi'
+        ord = trbasis_order - 3;  soblev = 'H^4 semi';
+    case 'h5'
+        ord = trbasis_order - 4;  soblev = 'H^5';
+    case 'h5semi'
+        ord = trbasis_order - 4;  soblev = 'H^5 semi';
+    case 'h6'
+        ord = trbasis_order - 5;  soblev = 'H^6';
+    case 'h6semi'
+        ord = trbasis_order - 5;  soblev = 'H^6 semi';
+end
+
+
+switch exnum
+    %% example 1: a simple case for test, \Omega=(-1,1)x(-1,1)
+    case 1    
+        switch elemtype
+            case 3
+                [node,elem] = squaremesh([-1,1,-1,1],2); % structure mesh
+%                 g = [ 2     2     2     2
+%                     -1     1     1    -1
+%                     1     1    -1    -1
+%                     1     1    -1    -1
+%                     1    -1    -1     1
+%                     0     0     0     0
+%                     1     1     1     1 ];
+%                 [p,e,t] = initmesh(g,'hmax',2);
+%                 node = p'; elem = t(1:3,:)';  % non-structure mesh
+                %[node,elem] = regpolygon(5,1);  % polygon mesh
+            case 4
+                [node,elem] = squarequadmesh([-1,1,-1,1],2);
+        end
+        mesh.P = node';  mesh.T = elem';  mesh.N = size(elem,1);
+        bdFlag = setboundary(node,elem,'Dirichlet');
+        bdinfo = genMeshbdinfo(elem,bdFlag);
+        coeff.l = @(x,y) sin(y*pi/5);
+        coeff.m = @(x,y) cos(x*pi/5);
+        f1 = @(x,y) x.*sin(y);
+        f2 = @(x,y) exp(y);
+        uclass1 = cell(7,9);  
+        uclass2 = cell(7,9);  
+        bdinfo.function = cell(2,4);
+        bdinfo.function{1,1} = @(x,y) 0+x-x;
+        bdinfo.function{2,1} = @(x,y) 0+x-x;
+
+        % 边界必须不相交,也可以写为
+%         bdinfo.function{1} = @(x,y) exp(-1+y).*(x==-1 & y~=1) + ...
+%                             exp(1+y).*(x==1 & y~=-1) + ...
+%                             exp(x-1).*(y==-1 & x~=-1) + ...
+%                             exp(x+1).*(y==1 & x~=1);
+
+    %% example 2: Poisson equation, \Omega=(0,1)x(0,1)
+    case 2    
+        switch elemtype
+            case 3
+                [node,elem] = squaremesh([0,1,0,1],1); % structure mesh
+                %load lakemesh.mat; node = node/5; % lake mesh 
+            case 4
+                [node,elem] = squarequadmesh([0,1,0,1],1);
+        end
+        mesh.P = node';  mesh.T = elem';  mesh.N = size(elem,1);
+        bdFlag = setboundary(node,elem,'Dirichlet');
+        bdinfo = genMeshbdinfo(elem,bdFlag);
+        coeff.l = @(x,y) 1;
+        coeff.m = @(x,y) 2;
+        f1 = @(x,y) 5*pi^2*sin(pi*x).*sin(pi*y) - 3*(2*x-1).*(2*y-1) + 2*pi^2*sin(pi*x).*sin(pi*y);
+        f2 = @(x,y) -5*2*x.*(x-1) - 3*pi^2*cos(pi*x).*cos(pi*y) - 4*y.*(y-1);
+        uclass1 = cell(7,9);  
+        uclass1{1,1} = @(x,y) sin(pi*x).*sin(pi*y); % exact solution
+        uclass1{2,1} = @(x,y) pi*sin(pi*x).*cos(pi*y); % uy
+        uclass1{2,2} = @(x,y) pi*sin(pi*y).*cos(pi*x); % ux
+        uclass1{3,1} = @(x,y) -pi^2*sin(pi*x).*sin(pi*y); % uyy
+        uclass1{3,2} = @(x,y) pi^2*cos(pi*x).*cos(pi*y); % uxy
+        uclass1{3,3} = @(x,y) -pi^2*sin(pi*x).*sin(pi*y); % uxx
+        uclass2 = cell(7,9); 
+        uclass2{1,1} = @(x,y) x.*(x-1).*y.*(y-1); % exact solution
+        uclass2{2,1} = @(x,y) x.*(x-1).*(2*y-1); % uy
+        uclass2{2,2} = @(x,y) y.*(y-1).*(2*x-1); % ux
+        uclass2{3,1} = @(x,y) x.*(x-1)*2; % uyy
+        uclass2{3,2} = @(x,y) (2*x-1).*(2*y-1); % uxy
+        uclass2{3,3} = @(x,y) y.*(y-1)*2; % uxx
+        bdinfo.function = cell(2,4);
+        bdinfo.function{1,1} = @(x,y) 0+x-x;
+        bdinfo.function{2,1} = @(x,y) 0+x-x;
+
+end
+
+Efem = zeros(1,refine);  % FEM error: ||u-u_h||
+EI = zeros(1,refine); % interpolation error: ||u-I_h(u)||
+EIfem = zeros(1,refine); % ||I_h(u)-u_h||
+T = zeros(1,refine);  % cpu time
+H = zeros(1,refine);  % mesh size
+Dof = zeros(1,refine);  % degree of freedom
+uzeros = cell(7,9);
+for i = 1:7
+    for j = 1:9
+        uzeros{i,j} = @(x,y) 0+x-x;
+    end
+end
+
+for i = 1:refine
+    t1=cputime;
+    % generate mesh and bdinfo
+    switch elemtype
+        case 3
+            [node,elem,bdFlag] = uniformrefine(node,elem,bdFlag);
+        case 4
+            [node,elem,bdFlag] = uniformrefinequad(node,elem,bdFlag);
+    end
+    mesh.P = node';  mesh.T = elem';  mesh.N = size(elem,1);
+    bdinfo = genMeshbdinfo(elem,bdFlag,bdinfo);
+    %      if elemtype == 4   % counterclockwise
+    %          t = mesh.T(2,:); mesh.T(2,:) = mesh.T(4,:); mesh.T(4,:) = t;
+    %      end
+    
+    % compute mesh size
+    e1 = mesh.P(:,mesh.T(1,:))-mesh.P(:,mesh.T(2,:));
+    e2 = mesh.P(:,mesh.T(2,:))-mesh.P(:,mesh.T(3,:));
+    e3 = mesh.P(:,mesh.T(3,:))-mesh.P(:,mesh.T(1,:));
+    h0 = min([e1(1,:).^2+e1(2,:).^2, e2(1,:).^2+e2(2,:).^2, e3(1,:).^2+e3(2,:).^2]);
+    H(i) = sqrt(h0);
+
+    %% FEM main routine
+    [uh,~,basis,A,F] = lineStableElasticity2(mesh,coeff,f1,f2,bdinfo,trbasis_type,...
+        trbasis_order,tsbasis_type,tsbasis_order,Gauss_order,femtype);
+    u1h = uh(1:basis.trial.Nb);
+    u2h = uh(basis.trial.Nb+1:end);
+
+    % FEM interpolation
+    if ~isempty(uclass1{1,1}) && ~isempty(uclass2{1,1})
+        u1I = uclass1{1,1}(basis.trial.Pb(1,:)',basis.trial.Pb(2,:)');
+        u2I = uclass2{1,1}(basis.trial.Pb(1,:)',basis.trial.Pb(2,:)');
+    end
+
+    if ~isempty(uclass1{1,1}) && ~isempty(uclass2{1,1})
+        switch elemtype
+            case 3
+                if strcmp(errtype,'linf')
+                    Efem(i) = max( triError2(mesh,basis,uclass1,u1h,errtype,Gauss_order,femtype) , ...
+                        triError2(mesh,basis,uclass2,u2h,errtype,Gauss_order,femtype) );
+                    EI(i) = max( triError2(mesh,basis,uclass1,u1I,errtype,Gauss_order,femtype) , ...
+                        triError2(mesh,basis,uclass2,u2I,errtype,Gauss_order,femtype) );
+                    EIfem(i) = max( triError2(mesh,basis,uzeros,u1I-u1h,errtype,Gauss_order,femtype) , ...
+                        triError2(mesh,basis,uzeros,u2I-u2h,errtype,Gauss_order,femtype) );
+                else
+                    Efem(i) = (triError2(mesh,basis,uclass1,u1h,errtype,Gauss_order,femtype))^2 + ...
+                        (triError2(mesh,basis,uclass2,u2h,errtype,Gauss_order,femtype))^2;
+                    Efem(i) = sqrt(Efem(i));
+                    EI(i) = (triError2(mesh,basis,uclass1,u1I,errtype,Gauss_order,femtype))^2 + ...
+                        (triError2(mesh,basis,uclass2,u2I,errtype,Gauss_order,femtype))^2;
+                    EI(i) = sqrt(EI(i));
+                    EIfem(i) = (triError2(mesh,basis,uzeros,u1I-u1h,errtype,Gauss_order,femtype))^2 + ...
+                        (triError2(mesh,basis,uzeros,u2I-u2h,errtype,Gauss_order,femtype))^2;
+                    EIfem(i) = sqrt(EIfem(i));
+                end
+
+            case 4
+
+        end
+    end
+
+    t2=cputime;
+    T(i) = t2-t1;
+    Dof(i) = basis.trial.Nb;
+    fprintf('i = %d, dof = %d \n',i,Dof(i));
+end
+
+toc;
+
+if contains(plottype,'0') % draw mesh
+    figure(10);
+    showmesh(node,elem);
+    %findnode(basis.test.Pb');
+    %findelem(node,elem);
+end
+
+if contains(plottype,'1') % plot error
+    R = Efem;
+    switch isnan(R(1))
+        case 1
+            R(1) = 0;
+        case 0
+            R(1) = 0.5*R(1);
+    end
+    for i=2:length(Efem)
+        R(i) = R(i-1)/2^ord;
+    end
+    figure(1); 
+    set(gcf,'unit','normalized','position',[0.2, 0.2, 0.5, 0.7]);
+    loglog(Dof,Efem,'-*',Dof,EI,'-o',Dof,EIfem,'-.x',Dof,R,'--+','linewidth',1); hold on;
+    str1 = ['Lagrange ',num2str(trbasis_order),' order element ',soblev,' error'];
+    str2 = strcat(['$||u-u_h||_{',soblev,'}$']);
+    str3 = strcat(['$||u-I_h(u)||_{',soblev,'}$']);
+    str4 = strcat(['$||I_h(u)-u_h||_{',soblev,'}$']);
+    str5 = ['$y=O(h^',num2str(ord),')$'];
+    title(str1);
+    legend(str2,str3,str4,str5,'location','southwest','interpreter','latex');
+    xlabel('Dof','Interpreter','latex');
+    ylabel('Error','Interpreter','latex');
+    set(gca,'fontsize',18);
+end
+
+% plot fem and exact solution
+if contains(plottype,'2') && ~isempty(uclass1{1,1}) && ~isempty(uclass2{1,1}) 
+    s = num2str(plotdx_order); t = num2str(plotdy_order);
+    st = num2str(plotdx_order + plotdy_order);
+    str1 = strcat(['FEM linear interpolation solution $I_h(d^',st,'u_{1,h}',...
+                    '/dx^',s,'dy^',t,')$']);
+    str2 = strcat(['Exact solution $I_h(d^',st,'u_1/dx^',s,'dy^',t,')$']);
+    str3 = strcat(['FEM linear interpolation solution $I_h(d^',st,'u_{2,h}',...
+                    '/dx^',s,'dy^',t,')$']);
+    str4 = strcat(['Exact solution $I_h(d^',st,'u_2/dx^',s,'dy^',t,')$']);
+    figure(2);
+    set(gcf,'unit','normalized','position',[0.1, 0.1, 0.8, 0.8]);
+    subplot(221); % plot fem solution 
+    if basis.trial.type == 'l' && basis.test.type == 'l' && ...
+       basis.trial.order == 1 && basis.test.order == 1 && ...
+       plotdx_order == 0 && plotdy_order == 0
+        Iu1h = u1h;
+    else
+        [Iu1h, ~] = utriFEM2(mesh,basis,u1h,mesh.P(1,:)',mesh.P(2,:)',...
+            plotdx_order,plotdy_order,femtype,upperbd);
+    end
+    p0 = mesh.P;
+    t0 = [mesh.T;ones(1,length(mesh.T(1,:)))];
+    if isreal(Iu1h)
+        pdesurf(p0,t0,Iu1h);
+    else
+        pdesurf(p0,t0,abs(Iu1h));
+        %pdesurf(p0,t0,-angle(Iu1h));
+    end
+    view(0,90);
+    colorbar;
+    colormap parula;
+    title(str1,'Interpreter','latex');
+    set(gca,'fontsize',18);
+    grid on;
+
+    subplot(222); % plot exact solution (linear interpolation)
+    u1exact = uclass1{plotdx_order + plotdy_order + 1, plotdx_order + 1}...
+            (mesh.P(1,:)',mesh.P(2,:)');
+    p0 = mesh.P;
+    t0 = [mesh.T;ones(1,length(mesh.T(1,:)))];
+    if isreal(u1exact)
+        pdesurf(p0,t0,u1exact);
+    else
+        pdesurf(p0,t0,abs(u1exact));
+        %pdesurf(p0,t0,angle(u1exact));
+    end
+    shading interp;
+    colormap parula;
+    view(0,90);
+    colorbar;
+    title(str2,'Interpreter','latex');
+    set(gca,'fontsize',18);
+    grid on;
+
+    subplot(223); % plot fem solution 
+    if basis.trial.type == 'l' && basis.test.type == 'l' && ...
+       basis.trial.order == 1 && basis.test.order == 1 && ...
+       plotdx_order == 0 && plotdy_order == 0
+        Iu2h = u2h;
+    else
+        [Iu2h, ~] = utriFEM2(mesh,basis,u2h,mesh.P(1,:)',mesh.P(2,:)',...
+            plotdx_order,plotdy_order,femtype,upperbd);
+    end
+    p0 = mesh.P;
+    t0 = [mesh.T;ones(1,length(mesh.T(1,:)))];
+    if isreal(Iu2h)
+        pdesurf(p0,t0,Iu2h);
+    else
+        pdesurf(p0,t0,abs(Iu2h));
+        %pdesurf(p0,t0,-angle(Iu2h));
+    end
+    view(0,90);
+    colorbar;
+    colormap parula;
+    title(str3,'Interpreter','latex');
+    set(gca,'fontsize',18);
+    grid on;
+
+    subplot(224); % plot exact solution (linear interpolation)
+    u2exact = uclass2{plotdx_order + plotdy_order + 1, plotdx_order + 1}...
+            (mesh.P(1,:)',mesh.P(2,:)');
+    p0 = mesh.P;
+    t0 = [mesh.T;ones(1,length(mesh.T(1,:)))];
+    if isreal(u2exact)
+        pdesurf(p0,t0,u2exact);
+    else
+        pdesurf(p0,t0,abs(u2exact));
+        %pdesurf(p0,t0,angle(u2exact));
+    end
+    shading interp;
+    colormap parula;
+    view(0,90);
+    colorbar;
+    title(str4,'Interpreter','latex');
+    set(gca,'fontsize',18);
+    grid on;
+end
+
+% only plot fem solution
+if contains(plottype,'2') && isempty(uclass1{1,1}) && isempty(uclass2{1,1}) 
+    s = num2str(plotdx_order); t = num2str(plotdy_order);
+    st = num2str(plotdx_order + plotdy_order);
+    str1 = strcat(['FEM linear interpolation solution $I_h(d^',st,'u_{1,h}',...
+                    '/dx^',s,'dy^',t,')$']);
+    str2 = strcat(['Exact solution $I_h(d^',st,'u_1/dx^',s,'dy^',t,')$']);
+    str3 = strcat(['FEM linear interpolation solution $I_h(d^',st,'u_{2,h}',...
+                    '/dx^',s,'dy^',t,')$']);
+    str4 = strcat(['Exact solution $I_h(d^',st,'u_2/dx^',s,'dy^',t,')$']);
+
+    figure(2);
+    set(gcf,'unit','normalized','position',[0.2, 0.2, 0.9, 0.6]);
+    subplot(121); % plot fem solution u1h 
+    if basis.trial.type == 'l' && basis.test.type == 'l' && ...
+       basis.trial.order == 1 && basis.test.order == 1 && ...
+       plotdx_order == 0 && plotdy_order == 0
+        Iu1h = u1h;
+    else
+        [Iu1h, ~] = utriFEM2(mesh,basis,u1h,mesh.P(1,:)',mesh.P(2,:)',...
+            plotdx_order,plotdy_order,femtype,upperbd);
+    end
+    p0 = mesh.P;
+    t0 = [mesh.T;ones(1,length(mesh.T(1,:)))];
+    if isreal(Iu1h)
+        pdesurf(p0,t0,Iu1h);
+    else
+        pdesurf(p0,t0,abs(Iu1h));
+        %pdesurf(p0,t0,-angle(Iu1h));
+    end
+    view(0,90);
+    colorbar;
+    colormap parula;
+    title(str1,'Interpreter','latex');
+    set(gca,'fontsize',18);
+    grid on;
+
+    subplot(122); % plot fem solution u2h
+    if basis.trial.type == 'l' && basis.test.type == 'l' && ...
+       basis.trial.order == 1 && basis.test.order == 1 && ...
+       plotdx_order == 0 && plotdy_order == 0
+        Iu2h = u2h;
+    else
+        [Iu2h, ~] = utriFEM2(mesh,basis,u2h,mesh.P(1,:)',mesh.P(2,:)',...
+            plotdx_order,plotdy_order,femtype,upperbd);
+    end
+    p0 = mesh.P;
+    t0 = [mesh.T;ones(1,length(mesh.T(1,:)))];
+    if isreal(Iu2h)
+        pdesurf(p0,t0,Iu2h);
+    else
+        pdesurf(p0,t0,abs(Iu2h));
+        %pdesurf(p0,t0,-angle(Iu2h));
+    end
+    view(0,90);
+    colorbar;
+    colormap parula;
+    title(str3,'Interpreter','latex');
+    set(gca,'fontsize',18);
+    grid on;
+
+end
+
+if contains(plottype,'3') % plot stiffness matrix
+    figure(3)
+    spy(A);
+    title("Nonzero element in stiffness matrix");
+    set(gca,'fontsize',18);
+end
+
+if contains(plottype,'4') % plot absolute error surface
+    figure(4)
+    set(gcf,'unit','normalized','position',[0.2, 0.2, 0.8, 0.6]);
+    subplot(121)
+    pdesurf(p0,t0,abs(u1I - u1h));
+    colormap parula;
+    view(0,90);
+    colorbar;
+    title('$||I_h(u_1)-u_{1,h}||$','Interpreter','latex');
+    set(gca,'fontsize',18);
+    grid on;
+
+    subplot(122)
+    pdesurf(p0,t0,abs(u2I - u2h));
+    colormap parula;
+    view(0,90);
+    colorbar;
+    title('$||I_h(u_2)-u_{2,h}||$','Interpreter','latex');
+    set(gca,'fontsize',18);
+    grid on;
+end
+
+if contains(plottype,'5') % plot cpu time during each refinement
+    figure(5)
+    plot(1:1:length(T),T,'-o','linewidth',1);
+    title("CPU time");
+    set(gca,'fontsize',18);
+end
+
+ 
